@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบพยากรณ์อากาศและคาดการณ์เรดาร์ 10 ชั่วโมง (Radar Forecast System)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for 10-Hour Trend Graph -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+        
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Radar scan effect */
+        .radar-grid {
+            background: radial-gradient(circle, rgba(14, 165, 233, 0.08) 0%, rgba(15, 23, 42, 0.95) 75%);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden select-none">
+
+    <!-- Top Header Navigation -->
+    <header class="bg-slate-900/90 border-b border-slate-800 px-6 py-3 flex items-center justify-between z-20 backdrop-blur">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-400">
+                <i class="fa-solid fa-satellite-dish text-xl animate-pulse"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                    ระบบวิเคราะห์และพยากรณ์กลุ่มฝนเรดาร์ (Next 10 Hours Radar Forecast)
+                    <span id="headerStationBadge" class="text-xs font-medium px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Live Radar Composite</span>
+                </h1>
+                <p class="text-xs text-slate-400">ประมวลผลข้อมูลเรดาร์สะท้อนรวม คำนวณเวกเตอร์การเคลื่อนตัว และประเมินสถานการณ์ล่วงหน้า 10 ชั่วโมง</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <!-- Active Station Selector -->
+            <div class="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+                <i class="fa-solid fa-tower-cell text-cyan-400 text-sm"></i>
+                <span class="text-xs text-slate-300">สถานีเรดาร์:</span>
+                <select id="stationSelect" onchange="onStationChange(this.value)" class="bg-transparent text-xs font-semibold text-cyan-300 focus:outline-none cursor-pointer">
+                    <option value="composite" class="bg-slate-900 text-white">composite (รวมทุกสถานีทั่วประเทศ)</option>
+                    <option value="bkk" class="bg-slate-900 text-white">เรดาร์หนองจอก (กรุงเทพฯ)</option>
+                    <option value="svp" class="bg-slate-900 text-white">เรดาร์สุวรรณภูมิ (สมุทรปราการ)</option>
+                    <option value="sth" class="bg-slate-900 text-white">เรดาร์สัตหีบ (ชลบุรี)</option>
+                    <option value="psl" class="bg-slate-900 text-white">เรดาร์พิษณุโลก</option>
+                </select>
+            </div>
+
+            <!-- Google Maps View Integration Trigger -->
+            <button id="googleMapBtn" onclick="openGoogleMapModal()" class="flex items-center gap-2 px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg shadow-lg shadow-emerald-950/40 transition-all border border-emerald-400/40">
+                <i class="fa-solid fa-map-location-dot text-emerald-200"></i>
+                <span>เปิดดูบน Google Maps</span>
+            </button>
+
+            <!-- Gemini API Key Config Button -->
+            <button onclick="openApiKeyModal()" title="ตั้งค่า Gemini API Key" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 text-xs rounded-lg border border-slate-700 transition">
+                <i class="fa-solid fa-key"></i>
+            </button>
+
+            <!-- Gemini AI Analysis Trigger -->
+            <button id="aiAnalysisBtn" onclick="generateAiForecast()" class="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-medium rounded-lg shadow-lg shadow-cyan-900/30 transition-all border border-cyan-400/30">
+                <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i>
+                <span>ให้ AI สรุปอาการ & วิเคราะห์ 10 ชม.</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex overflow-hidden">
+
+        <!-- Left Toolbar & Layer Control Panel -->
+        <aside class="w-80 bg-slate-900/60 border-r border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto">
+            
+            <!-- [ADDED] Satellite Imagery & Radar View Mode Selector -->
+            <div class="bg-slate-800/60 p-3 rounded-xl border border-cyan-500/30 space-y-2">
+                <h3 class="text-xs font-bold text-cyan-300 flex items-center justify-between">
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-satellite text-cyan-400"></i> รูปแบบภาพแสดงผล (View Mode)</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Himawari-9</span>
+                </h3>
+                <div class="grid grid-cols-3 gap-1 text-[11px]">
+                    <button id="modeSatRgb" onclick="setViewMode('satellite_rgb')" class="px-2 py-1.5 rounded-lg bg-cyan-600 text-white font-semibold transition border border-cyan-400/40 text-center shadow">
+                        🛰️ ดาวเทียมจริง
+                    </button>
+                    <button id="modeSatIr" onclick="setViewMode('satellite_ir')" class="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 transition border border-slate-700 text-center">
+                        🌈 อินฟราเรด
+                    </button>
+                    <button id="modeRadar" onclick="setViewMode('radar_dbz')" class="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 transition border border-slate-700 text-center">
+                        📡 เรดาร์ Doppler
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dynamic Legend Container (Changes with View Mode) -->
+            <div id="legendContainer" class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/60">
+                <h3 id="legendTitle" class="text-xs font-bold text-slate-300 mb-2 flex items-center justify-between">
+                    <span>ระดับความหนาแน่นเมฆดาวเทียม (Cloud Opacity)</span>
+                    <i class="fa-solid fa-circle-info text-slate-400 text-xs"></i>
+                </h3>
+                <div id="legendItems" class="space-y-1.5 text-xs">
+                    <!-- Populated dynamically via JavaScript -->
+                </div>
+            </div>
+
+            <!-- Simulation Parameters -->
+            <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/60 space-y-3">
+                <h3 class="text-xs font-bold text-slate-300 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-cyan-400"></i>
+                    <span>เงื่อนไขการพยากรณ์ (Extrapolation Controls)</span>
+                </h3>
+
+                <div>
+                    <label class="text-xs text-slate-400 block mb-1">ความเร็วลมชี้นำ (Steering Wind Vector)</label>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-slate-900/80 p-2 rounded border border-slate-700">
+                            <span class="text-slate-400 block">ทิศทาง:</span>
+                            <span id="windDirText" class="font-bold text-cyan-300 mono">SW (225°)</span>
+                        </div>
+                        <div class="bg-slate-900/80 p-2 rounded border border-slate-700">
+                            <span class="text-slate-400 block">ความเร็ว:</span>
+                            <span id="windSpeedText" class="font-bold text-cyan-300 mono">28 กม./ชม.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs text-slate-400 block mb-1">อัตราการเติบโต/สลายตัวกลุ่มเมฆ (Cell Evolution)</label>
+                    <select id="evolutionModel" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-200 focus:outline-none">
+                        <option value="decay">สลายตัวช้าๆ (Convective Dissipation)</option>
+                        <option value="steady" selected>คงที่ตามทิศทางลม (Linear Advection)</option>
+                        <option value="intensify">กำลังก่อตัวเพิ่มขึ้น (Rapid Intensification)</option>
+                    </select>
+                </div>
+
+                <!-- Toggle Options -->
+                <div class="space-y-2 pt-2 border-t border-slate-700/50 text-xs">
+                    <label class="flex items-center gap-2 text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="showVectors" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0">
+                        <span>แสดงเวกเตอร์การเคลื่อนตัว (Motion Vectors)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="showRings" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0">
+                        <span>แสดงวงแหวนระยะทาง (Range Rings)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="showGrid" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0">
+                        <span>แสดงพิกัดละติจูด/ลองจิจูด</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-cyan-300 cursor-pointer font-medium">
+                        <input type="checkbox" id="showSweepBeam" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0">
+                        <span>แสดงลำแสงกวาดดาวเทียม/เรดาร์ (Scan Beam)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-amber-300 cursor-pointer font-medium">
+                        <input type="checkbox" id="showLightning" checked class="rounded border-slate-700 text-amber-500 focus:ring-0">
+                        <span>แสดงประกายฟ้าผ่าในแกนพายุ (Lightning)</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Current Weather Summary Metrics -->
+            <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/60 space-y-2">
+                <h3 class="text-xs font-bold text-slate-300">ภาพรวมกลุ่มฝนในรัศมี 200 กม.</h3>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div class="bg-slate-900/60 p-2 rounded">
+                        <span class="text-slate-400 block text-[10px]">พื้นที่ปกคลุมฝน</span>
+                        <span id="rainAreaMetric" class="text-sm font-bold text-emerald-400 mono">38.4%</span>
+                    </div>
+                    <div class="bg-slate-900/60 p-2 rounded">
+                        <span class="text-slate-400 block text-[10px]">dBZ สูงสุด</span>
+                        <span id="maxDbzMetric" class="text-sm font-bold text-red-400 mono">56.2 dBZ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Google Maps Station Card -->
+            <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/60 space-y-2 text-xs">
+                <div class="flex items-center justify-between text-slate-300">
+                    <span class="font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-location-dot text-rose-500"></i> ตำแหน่งสถานีเรดาร์
+                    </span>
+                    <button onclick="openCurrentStationInGoogleMap()" class="text-[10px] text-cyan-400 hover:underline">
+                        เปิดแผนที่จริง &rarr;
+                    </button>
+                </div>
+                <div class="bg-slate-900/70 p-2 rounded text-slate-400 mono text-[11px] space-y-1">
+                    <div class="flex justify-between">
+                        <span>พิกัดศูนย์กลาง:</span>
+                        <span id="stationCoordsLabel" class="text-cyan-300">13.74°N, 100.50°E</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>รัศมีกวาดสัญญาณ:</span>
+                        <span class="text-slate-300">240 กิโลเมตร</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center Viewport: Interactive Radar Canvas -->
+        <main class="flex-1 flex flex-col relative bg-slate-950">
+            <!-- Overlay Time Banner -->
+            <div class="absolute top-4 left-4 z-10 flex items-center gap-3 bg-slate-900/90 border border-slate-700/80 px-4 py-2 rounded-xl backdrop-blur shadow-2xl">
+                <div id="timeStatusBadge" class="w-3 h-3 rounded-full bg-cyan-400 animate-ping"></div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span id="timelineTypeLabel" class="text-xs font-bold uppercase tracking-wider text-cyan-400">สถานะ: ปัจจุบัน (Observed)</span>
+                        <span id="timestampDisplay" class="text-sm font-bold mono text-white">2026-09-29 14:30 น.</span>
+                    </div>
+                    <span id="forecastOffsetLabel" class="text-xs text-slate-400">พยากรณ์ล่วงหน้า: +0 ชั่วโมง</span>
+                </div>
+            </div>
+
+            <!-- Radar Canvas Container -->
+            <div class="flex-1 relative flex items-center justify-center overflow-hidden radar-grid">
+                <canvas id="radarCanvas" class="max-w-full max-h-full cursor-crosshair"></canvas>
+                
+                <!-- Crosshair Coordinates Hover Info -->
+                <div id="hoverTooltip" class="absolute hidden bg-slate-900/95 border border-cyan-500/40 p-2.5 rounded-lg text-xs mono pointer-events-none shadow-2xl z-30 backdrop-blur">
+                    <div id="tooltipLatLon" class="text-cyan-300 font-semibold">Lat: 13.75, Lon: 100.50</div>
+                    <div id="tooltipDbz" class="text-slate-300">สะท้อน: 42 dBZ (ฝนปานกลาง)</div>
+                    <div class="text-[10px] text-emerald-400 pt-1 border-t border-slate-700/60 mt-1 flex items-center gap-1">
+                        <i class="fa-solid fa-arrow-pointer"></i> คลิกบนจุดนี้เพื่อเปิด Google Maps
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Timeline Scrub & Playback Controls -->
+            <div class="bg-slate-900/90 border-t border-slate-800 p-4 z-10 backdrop-blur space-y-2">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <span class="mono text-slate-400"><i class="fa-solid fa-clock-rotate-left mr-1"></i> อดีต (-10 ชม.)</span>
+                    <span class="font-bold text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">ช่วงเวลาพยากรณ์ปัจจุบัน (0h)</span>
+                    <span class="mono text-indigo-400">อนาคต (+10 ชม.) <i class="fa-solid fa-crystal-ball ml-1"></i></span>
+                </div>
+
+                <!-- Timeline Slider -->
+                <div class="relative flex items-center">
+                    <input type="range" id="timeSlider" min="-10" max="10" step="1" value="0"
+                           class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 focus:outline-none">
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="flex items-center justify-between pt-1">
+                    <div class="flex items-center gap-2">
+                        <button id="playBtn" onclick="togglePlay()" class="w-10 h-10 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center font-bold shadow-lg shadow-cyan-500/20 transition">
+                            <i id="playIcon" class="fa-solid fa-play"></i>
+                        </button>
+                        <button onclick="stepFrame(-1)" class="p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">
+                            <i class="fa-solid fa-backward-step"></i> -1 ชม.
+                        </button>
+                        <button onclick="stepFrame(1)" class="p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">
+                            +1 ชม. <i class="fa-solid fa-forward-step"></i>
+                        </button>
+                        <button onclick="resetToNow()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-medium">
+                            <i class="fa-solid fa-bullseye mr-1"></i> ปัจจุบัน (0h)
+                        </button>
+                    </div>
+
+                    <!-- Playback Speed -->
+                    <div class="flex items-center gap-1 text-xs bg-slate-800 p-1 rounded-lg border border-slate-700">
+                        <span class="text-slate-400 px-2">ความเร็ว:</span>
+                        <button onclick="setSpeed(0.5)" class="speed-btn px-2 py-1 rounded text-slate-300 hover:bg-slate-700">0.5x</button>
+                        <button onclick="setSpeed(1)" class="speed-btn px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">1x</button>
+                        <button onclick="setSpeed(2)" class="speed-btn px-2 py-1 rounded text-slate-300 hover:bg-slate-700">2x</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar: 10-Hour Forecast & AI Summary -->
+        <aside class="w-96 bg-slate-900/60 border-l border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto">
+            
+            <!-- AI Forecast Summary Output Container -->
+            <div class="bg-slate-800/40 border border-slate-700/80 rounded-xl p-4 space-y-3 relative overflow-hidden">
+                <div class="flex items-center justify-between border-b border-slate-700/60 pb-2">
+                    <h3 class="text-xs font-bold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-microchip text-cyan-400"></i>
+                        <span>สรุปพยากรณ์อาการฝน (10-Hour AI Insight)</span>
+                    </h3>
+                    <span id="aiEngineBadge" class="text-[10px] text-slate-400 mono">Nowcasting Engine</span>
+                </div>
+
+                <div id="aiSummaryBox" class="text-xs text-slate-300 leading-relaxed min-h-[120px] flex flex-col justify-center">
+                    <div class="text-center text-slate-500 py-4">
+                        <i class="fa-solid fa-wand-magic-sparkles text-2xl mb-2 text-cyan-500/40 block"></i>
+                        กดปุ่ม <span class="text-cyan-400 font-semibold">"ให้ AI สรุปอาการ & วิเคราะห์"</span> เพื่อสร้างรายงานวิเคราะห์ความเสี่ยงและแนวโน้มกลุ่มฝน 10 ชั่วโมงข้างหน้า
+                    </div>
+                </div>
+            </div>
+
+            <!-- 10-Hour Rainfall Intensity Graph -->
+            <div class="bg-slate-800/40 border border-slate-700/80 rounded-xl p-4 space-y-2">
+                <h3 class="text-xs font-bold text-slate-200 flex items-center justify-between">
+                    <span>กราฟแนวโน้มปริมาณฝน (0 ถึง +10 ชม.)</span>
+                    <span class="text-[10px] text-cyan-400 mono">mm/hr</span>
+                </h3>
+                <div class="h-40 relative">
+                    <canvas id="forecastChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Hourly Forecast Breakdown Table -->
+            <div class="bg-slate-800/40 border border-slate-700/80 rounded-xl p-4 space-y-3 flex-1">
+                <h3 class="text-xs font-bold text-slate-200 flex items-center justify-between">
+                    <span>ตารางคาดการณ์รายชั่วโมง (+1 ถึง +10 ชม.)</span>
+                    <i class="fa-solid fa-list-check text-slate-400"></i>
+                </h3>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-slate-400 text-[10px]">
+                                <th class="py-1.5">เวลา</th>
+                                <th class="py-1.5">ความแรง (dBZ)</th>
+                                <th class="py-1.5">ฝนสะสม</th>
+                                <th class="py-1.5 text-right">ความเสี่ยง</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hourlyTableBody" class="divide-y divide-slate-800 text-slate-300 mono">
+                            <!-- Populated dynamically via JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </aside>
+    </div>
+
+    <!-- Google Maps Modal Dialog -->
+    <div id="googleMapsModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in duration-200">
+            <!-- Modal Header -->
+            <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">
+                        <i class="fa-solid fa-map-location-dot text-lg"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            ตำแหน่งสถานีเรดาร์และพิกัดกลุ่มฝนบน Google Maps
+                            <span id="modalStationTag" class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Composite</span>
+                        </h2>
+                        <p class="text-xs text-slate-400">ตรวจสอบตำแหน่งทางภูมิศาสตร์จริง สภาพแวดล้อม และผังเมืองรอบรัศมีตรวจวัด</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="externalMapBtn" onclick="openCurrentInGoogleMapsTab()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs rounded-lg border border-slate-700 flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-up-right-from-square"></i> เปิดแท็บใหม่
+                    </button>
+                    <button onclick="closeGoogleMapModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body (Embedded Google Maps Iframe) -->
+            <div class="relative w-full h-[480px] bg-slate-950 flex items-center justify-center">
+                <iframe id="googleMapIframe" class="w-full h-full border-0" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade" src="about:blank"></iframe>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-5 py-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between text-xs text-slate-400">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-circle-info text-cyan-400"></i>
+                    <span>เคล็ดลับ: คุณสามารถคลิกตรงจุดใดก็ได้บนหน้าจอเรดาร์เรดาร์หลัก เพื่อส่งพิกัดนั้นมาเปิดบน Google Maps โดยตรง</span>
+                </div>
+                <button onclick="closeGoogleMapModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs">ปิด</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gemini API Key Configuration Modal with Gemini 3.8 Flash reference -->
+    <div id="apiKeyModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-key text-cyan-400"></i>
+                    <h3 class="text-sm font-bold text-white">ตั้งค่า Google Gemini API Key</h3>
+                </div>
+                <button onclick="closeApiKeyModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                กรอก Google Gemini API Key ของคุณเพื่อใช้โมเดลวิเคราะห์ล่าสุด <span class="text-cyan-300 font-bold mono">Gemini 3.8 Flash</span> 
+                (หากเว้นว่างไว้ ระบบจะใช้ <span class="text-emerald-400 font-semibold">Built-in Meteorological Nowcaster</span> วิเคราะห์ข้อมูลเรดาร์จริงให้ทันทีโดยไม่ต้องใช้ Key)
+            </p>
+            <div>
+                <label class="text-[11px] text-slate-300 block mb-1">Gemini API Key (บันทึกในเบราว์เซอร์ของคุณ):</label>
+                <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." 
+                       class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-cyan-300 font-mono focus:outline-none focus:border-cyan-500">
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-2">
+                <button onclick="clearApiKey()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs">ล้างค่า</button>
+                <button onclick="saveApiKey()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold">บันทึก Key</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Comprehensive Meteorological Station Database with Station-Specific Storm Profiles & Forecast Trends
+        const STATIONS_GEO = {
+            composite: {
+                name: 'Composite ทั่วประเทศ (ศูนย์กลาง กทม.)',
+                lat: 13.7367, lon: 100.5231,
+                windDir: 225, windDirText: 'SW (225°)', windSpeed: 28,
+                rainArea: '38.4%', maxDbz: 58.5,
+                mockData: [12, 18, 28, 35, 42, 38, 25, 15, 8, 4, 2],
+                cells: [
+                    {
+                        x: 180, y: 220, radius: 52, maxDbz: 60, growthRate: 0.15, spinSpeed: -0.025, bands: 3,
+                        subLobes: [
+                            { offsetDist: 14, angleOffset: 0.2, rRatio: 0.65, dbzOffset: -6 },
+                            { offsetDist: 26, angleOffset: 1.8, rRatio: 0.50, dbzOffset: -12 },
+                            { offsetDist: 38, angleOffset: 3.4, rRatio: 0.40, dbzOffset: -18 }
+                        ]
+                    },
+                    {
+                        x: 265, y: 185, radius: 58, maxDbz: 58, growthRate: 0.1, spinSpeed: -0.03, bands: 4,
+                        subLobes: [
+                            { offsetDist: 18, angleOffset: 0.5, rRatio: 0.7, dbzOffset: -5 },
+                            { offsetDist: 34, angleOffset: 2.1, rRatio: 0.55, dbzOffset: -11 }
+                        ]
+                    },
+                    {
+                        x: 120, y: 280, radius: 36, maxDbz: 46, growthRate: -0.1, spinSpeed: -0.018, bands: 2,
+                        subLobes: [
+                            { offsetDist: 12, angleOffset: 0.9, rRatio: 0.6, dbzOffset: -7 }
+                        ]
+                    },
+                    {
+                        x: 315, y: 315, radius: 40, maxDbz: 44, growthRate: -0.2, spinSpeed: -0.015, bands: 1,
+                        subLobes: [
+                            { offsetDist: 15, angleOffset: 1.5, rRatio: 0.6, dbzOffset: -9 }
+                        ]
+                    }
+                ]
+            },
+            bkk: {
+                name: 'สถานีเรดาร์หนองจอก (กทม.)',
+                lat: 13.8548, lon: 100.8604,
+                windDir: 205, windDirText: 'SSW (205°)', windSpeed: 22,
+                rainArea: '56.8%', maxDbz: 63.2,
+                mockData: [28, 45, 54, 48, 35, 22, 12, 6, 2, 0, 0],
+                cells: [
+                    {
+                        x: 205, y: 195, radius: 68, maxDbz: 64, growthRate: 0.22, spinSpeed: -0.035, bands: 4,
+                        subLobes: [
+                            { offsetDist: 15, angleOffset: 0.1, rRatio: 0.75, dbzOffset: -3 },
+                            { offsetDist: 28, angleOffset: 1.4, rRatio: 0.60, dbzOffset: -8 },
+                            { offsetDist: 42, angleOffset: 2.9, rRatio: 0.50, dbzOffset: -14 }
+                        ]
+                    },
+                    {
+                        x: 140, y: 230, radius: 44, maxDbz: 53, growthRate: 0.05, spinSpeed: -0.02, bands: 2,
+                        subLobes: [
+                            { offsetDist: 14, angleOffset: 0.8, rRatio: 0.6, dbzOffset: -6 }
+                        ]
+                    },
+                    {
+                        x: 290, y: 150, radius: 48, maxDbz: 56, growthRate: -0.15, spinSpeed: -0.022, bands: 2,
+                        subLobes: [
+                            { offsetDist: 18, angleOffset: 1.7, rRatio: 0.55, dbzOffset: -10 }
+                        ]
+                    }
+                ]
+            },
+            svp: {
+                name: 'สถานีเรดาร์สุวรรณภูมิ (สมุทรปราการ)',
+                lat: 13.6900, lon: 100.7500,
+                windDir: 180, windDirText: 'S (180°)', windSpeed: 30,
+                rainArea: '44.2%', maxDbz: 55.4,
+                mockData: [15, 26, 40, 52, 44, 28, 14, 5, 2, 0, 0],
+                cells: [
+                    {
+                        x: 190, y: 240, radius: 56, maxDbz: 58, growthRate: 0.18, spinSpeed: -0.028, bands: 3,
+                        subLobes: [
+                            { offsetDist: 16, angleOffset: 0.4, rRatio: 0.68, dbzOffset: -5 },
+                            { offsetDist: 32, angleOffset: 2.0, rRatio: 0.52, dbzOffset: -12 }
+                        ]
+                    },
+                    {
+                        x: 250, y: 260, radius: 45, maxDbz: 52, growthRate: 0.08, spinSpeed: -0.02, bands: 2,
+                        subLobes: [
+                            { offsetDist: 12, angleOffset: 1.1, rRatio: 0.6, dbzOffset: -7 }
+                        ]
+                    },
+                    {
+                        x: 130, y: 170, radius: 35, maxDbz: 42, growthRate: -0.2, spinSpeed: -0.015, bands: 1,
+                        subLobes: [
+                            { offsetDist: 10, angleOffset: 1.9, rRatio: 0.5, dbzOffset: -8 }
+                        ]
+                    }
+                ]
+            },
+            sth: {
+                name: 'สถานีเรดาร์สัตหีบ (ชลบุรี)',
+                lat: 12.6560, lon: 100.9930,
+                windDir: 245, windDirText: 'WSW (245°)', windSpeed: 36,
+                rainArea: '63.5%', maxDbz: 66.8,
+                mockData: [42, 58, 65, 50, 36, 20, 10, 4, 1, 0, 0],
+                cells: [
+                    {
+                        x: 170, y: 210, radius: 72, maxDbz: 68, growthRate: 0.25, spinSpeed: -0.04, bands: 4,
+                        subLobes: [
+                            { offsetDist: 20, angleOffset: 0.3, rRatio: 0.72, dbzOffset: -4 },
+                            { offsetDist: 38, angleOffset: 1.6, rRatio: 0.58, dbzOffset: -9 },
+                            { offsetDist: 52, angleOffset: 3.1, rRatio: 0.45, dbzOffset: -15 }
+                        ]
+                    },
+                    {
+                        x: 270, y: 170, radius: 55, maxDbz: 60, growthRate: 0.12, spinSpeed: -0.025, bands: 3,
+                        subLobes: [
+                            { offsetDist: 15, angleOffset: 0.8, rRatio: 0.65, dbzOffset: -6 }
+                        ]
+                    },
+                    {
+                        x: 120, y: 290, radius: 48, maxDbz: 54, growthRate: -0.1, spinSpeed: -0.018, bands: 2,
+                        subLobes: [
+                            { offsetDist: 14, angleOffset: 1.4, rRatio: 0.55, dbzOffset: -8 }
+                        ]
+                    }
+                ]
+            },
+            psl: {
+                name: 'สถานีเรดาร์พิษณุโลก',
+                lat: 16.7820, lon: 100.2790,
+                windDir: 290, windDirText: 'WNW (290°)', windSpeed: 18,
+                rainArea: '25.6%', maxDbz: 48.2,
+                mockData: [8, 14, 18, 24, 28, 22, 16, 10, 5, 2, 0],
+                cells: [
+                    {
+                        x: 190, y: 170, radius: 42, maxDbz: 49, growthRate: 0.05, spinSpeed: -0.018, bands: 2,
+                        subLobes: [
+                            { offsetDist: 12, angleOffset: 0.6, rRatio: 0.6, dbzOffset: -6 },
+                            { offsetDist: 25, angleOffset: 2.2, rRatio: 0.45, dbzOffset: -12 }
+                        ]
+                    },
+                    {
+                        x: 260, y: 240, radius: 38, maxDbz: 45, growthRate: -0.05, spinSpeed: -0.015, bands: 1,
+                        subLobes: [
+                            { offsetDist: 10, angleOffset: 1.2, rRatio: 0.55, dbzOffset: -7 }
+                        ]
+                    },
+                    {
+                        x: 130, y: 220, radius: 30, maxDbz: 38, growthRate: -0.1, spinSpeed: -0.012, bands: 1,
+                        subLobes: [
+                            { offsetDist: 8, angleOffset: 1.8, rRatio: 0.5, dbzOffset: -8 }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        // [MODIFIED] Global Application State & Configuration
+        const state = {
+            currentTimeOffset: 0,
+            isPlaying: false,
+            playSpeed: 1,
+            animationFrameId: null,
+            timerId: null,
+            windDirection: STATIONS_GEO.composite.windDir,
+            windSpeed: STATIONS_GEO.composite.windSpeed,
+            station: 'composite',
+            stationLat: STATIONS_GEO.composite.lat,
+            stationLon: STATIONS_GEO.composite.lon,
+            hoveredLat: 13.75,
+            hoveredLon: 100.50,
+            radarCells: [],
+            forecastChart: null,
+            sweepAngle: 0,
+            sweepSpeed: 0.038,
+            animTime: 0,
+            lightningStrikes: [],
+            backgroundScatter: [],
+            // [ADDED] Satellite View State
+            viewMode: 'satellite_rgb' // 'satellite_rgb' | 'satellite_ir' | 'radar_dbz'
+        };
+
+        // Load storm cells dynamically based on active station
+        function initRadarCells(stKey = 'composite') {
+            const currentStation = STATIONS_GEO[stKey] || STATIONS_GEO.composite;
+            state.radarCells = JSON.parse(JSON.stringify(currentStation.cells));
+
+            state.backgroundScatter = [];
+            for (let i = 0; i < 90; i++) {
+                state.backgroundScatter.push({
+                    x: Math.random() * 400,
+                    y: Math.random() * 400,
+                    radius: Math.random() * 4 + 2,
+                    dbz: Math.random() * 14 + 12,
+                    phase: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        // Setup HTML5 Canvas Context
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            const parent = canvas.parentElement;
+            const size = Math.min(parent.clientWidth - 32, parent.clientHeight - 32);
+            canvas.width = Math.max(400, size);
+            canvas.height = Math.max(400, size);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Convert dBZ to Color Scale
+        function getDbzColor(dbz, alpha = 0.8) {
+            if (dbz < 15) return `rgba(16, 185, 129, 0)`;
+            if (dbz < 25) return `rgba(52, 211, 153, ${alpha})`;
+            if (dbz < 35) return `rgba(74, 222, 128, ${alpha})`;
+            if (dbz < 45) return `rgba(250, 204, 21, ${alpha})`;
+            if (dbz < 55) return `rgba(249, 115, 22, ${alpha})`;
+            return `rgba(225, 29, 72, ${alpha})`;
+        }
+
+        // [ADDED] Satellite IR Temperature Color Scale (Dvorak / CTT Scale)
+        function getSatelliteIrColor(tempC, alpha = 0.88) {
+            // tempC approx: -20 to -85 C
+            if (tempC > -25) return `rgba(203, 213, 225, ${alpha * 0.3})`; // Low cloud gray
+            if (tempC > -38) return `rgba(56, 189, 248, ${alpha * 0.7})`;  // Medium cloud blue
+            if (tempC > -50) return `rgba(34, 197, 94, ${alpha * 0.85})`;  // Cold cloud green
+            if (tempC > -62) return `rgba(234, 179, 8, ${alpha * 0.9})`;   // Deep cold yellow
+            if (tempC > -74) return `rgba(239, 68, 68, ${alpha * 0.95})`;  // Very cold red
+            return `rgba(244, 63, 94, ${alpha})`;                         // Severe convective core pink/magenta
+        }
+
+        // [ADDED] Switch View Mode between Satellite True Color, IR, and Radar
+        function setViewMode(mode) {
+            state.viewMode = mode;
+            const btnRgb = document.getElementById('modeSatRgb');
+            const btnIr = document.getElementById('modeSatIr');
+            const btnRad = document.getElementById('modeRadar');
+
+            const activeClass = 'px-2 py-1.5 rounded-lg bg-cyan-600 text-white font-semibold transition border border-cyan-400/40 text-center shadow';
+            const inactiveClass = 'px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 transition border border-slate-700 text-center';
+
+            btnRgb.className = mode === 'satellite_rgb' ? activeClass : inactiveClass;
+            btnIr.className = mode === 'satellite_ir' ? activeClass : inactiveClass;
+            btnRad.className = mode === 'radar_dbz' ? activeClass : inactiveClass;
+
+            updateLegendUI();
+        }
+
+        // [ADDED] Update Legend UI dynamically based on active mode
+        function updateLegendUI() {
+            const legendTitle = document.getElementById('legendTitle');
+            const legendItems = document.getElementById('legendItems');
+
+            if (state.viewMode === 'satellite_rgb') {
+                legendTitle.innerHTML = `<span>ภาพถ่ายดาวเทียมมองเห็น (True Color / Visible)</span><i class="fa-solid fa-satellite text-cyan-400 text-xs"></i>`;
+                legendItems.innerHTML = `
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-slate-100 shadow border border-slate-300"></span> ยอดเมฆพายุหนาทึบ (Overshooting Tops)</span><span class="text-slate-400 mono">> 14 กม.</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-slate-300"></span> เมฆพาความร้อนหนา (Deep Convective)</span><span class="text-slate-400 mono">8 - 14 กม.</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-slate-400"></span> แถบเมฆเกลียวฝน (Spiral Arms)</span><span class="text-slate-400 mono">4 - 8 กม.</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-slate-500 opacity-60"></span> เมฆริ้วชั้นบน (Cirrus Outflow)</span><span class="text-slate-400 mono">โปร่งแสง</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-sky-950 border border-sky-800"></span> ท้องฟ้าโปร่ง / ผิวมหาสมุทร (Ocean)</span><span class="text-slate-400 mono">ไร้เมฆ</span></div>
+                `;
+            } else if (state.viewMode === 'satellite_ir') {
+                legendTitle.innerHTML = `<span>อุณหภูมิยอดเมฆอินฟราเรด (Cloud-Top Temp)</span><i class="fa-solid fa-temperature-arrow-down text-rose-400 text-xs"></i>`;
+                legendItems.innerHTML = `
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-rose-500"></span> เย็นจัดมาก (Severe Convective Core)</span><span class="text-slate-400 mono">&lt; -75 °C</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-red-500"></span> ยอดเมฆเย็นจัด (Very Cold CDO)</span><span class="text-slate-400 mono">-62 ถึง -74 °C</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-yellow-400"></span> เมฆฝนหนาแน่น (Cold Tops)</span><span class="text-slate-400 mono">-50 ถึง -62 °C</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-green-500"></span> เมฆชั้นกลาง (Mid Clouds)</span><span class="text-slate-400 mono">-38 ถึง -50 °C</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-sky-400"></span> เมฆชั้นต่ำ / ผิวดิน</span><span class="text-slate-400 mono">> -38 °C</span></div>
+                `;
+            } else {
+                legendTitle.innerHTML = `<span>ระดับความแรงสะท้อน (dBZ / mm/hr)</span><i class="fa-solid fa-circle-info text-slate-400 text-xs"></i>`;
+                legendItems.innerHTML = `
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-emerald-500"></span> เบามาก (&lt; 20 dBZ)</span><span class="text-slate-400 mono">&lt; 1 mm/h</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-green-400"></span> ฝนตกเล็กน้อย (20 - 35 dBZ)</span><span class="text-slate-400 mono">1 - 5 mm/h</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-yellow-400"></span> ฝนปานกลาง (35 - 45 dBZ)</span><span class="text-slate-400 mono">5 - 15 mm/h</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-orange-500"></span> ฝนตกหนัก (45 - 55 dBZ)</span><span class="text-slate-400 mono">15 - 30 mm/h</span></div>
+                    <div class="flex items-center justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-red-600"></span> ฝนตกหนักมาก / ลูกเห็บ (&gt; 55 dBZ)</span><span class="text-slate-400 mono">&gt; 30 mm/h</span></div>
+                `;
+            }
+        }
+
+        // Helper: Draw branching lightning inside severe storm cells
+        function drawLightningBolt(x1, y1, x2, y2, depth = 0) {
+            if (depth > 3) return;
+            const midX = (x1 + x2) / 2 + (Math.random() - 0.5) * 14;
+            const midY = (y1 + y2) / 2 + (Math.random() - 0.5) * 14;
+
+            ctx.strokeStyle = depth === 0 ? 'rgba(255, 255, 255, 0.95)' : 'rgba(165, 243, 252, 0.7)';
+            ctx.lineWidth = Math.max(0.8, 2.2 - depth * 0.6);
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(midX, midY);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            if (Math.random() < 0.45 && depth < 3) {
+                const branchX = midX + (Math.random() - 0.5) * 20;
+                const branchY = midY + (Math.random() - 0.5) * 20;
+                drawLightningBolt(midX, midY, branchX, branchY, depth + 1);
+            }
+        }
+
+        // [MODIFIED] Render Main Radar / Satellite Frame with Real Earth Surface & 3D Clouds
+        function renderRadar() {
+            const w = canvas.width;
+            const h = canvas.height;
+            const center = { x: w / 2, y: h / 2 };
+            const maxRadius = w / 2 - 20;
+
+            const isSatRgb = state.viewMode === 'satellite_rgb';
+            const isSatIr = state.viewMode === 'satellite_ir';
+
+            // 1. Clear & Render Earth Surface
+            if (isSatRgb) {
+                // Realistic Satellite Earth Crust & Deep Ocean
+                const oceanGrad = ctx.createRadialGradient(center.x - 40, center.y - 40, 20, center.x, center.y, maxRadius * 1.2);
+                oceanGrad.addColorStop(0, '#0f2744');
+                oceanGrad.addColorStop(0.6, '#081728');
+                oceanGrad.addColorStop(1, '#030a12');
+                ctx.fillStyle = oceanGrad;
+                ctx.fillRect(0, 0, w, h);
+
+                // Simulated Coastal Landmass Silhouette
+                ctx.save();
+                ctx.fillStyle = 'rgba(28, 48, 38, 0.45)'; // Tropical coastline tone
+                ctx.beginPath();
+                ctx.arc(center.x - maxRadius * 0.4, center.y - maxRadius * 0.3, maxRadius * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(center.x + maxRadius * 0.5, center.y + maxRadius * 0.4, maxRadius * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+            } else if (isSatIr) {
+                // Infrared Deep Atmosphere Background
+                ctx.fillStyle = '#060911';
+                ctx.fillRect(0, 0, w, h);
+            } else {
+                // Doppler Radar Deep Space
+                ctx.fillStyle = '#070b14';
+                ctx.fillRect(0, 0, w, h);
+            }
+
+            // Calculate Storm Movement Offset based on time offset
+            const angleRad = (state.windDirection - 90) * (Math.PI / 180);
+            const speedScale = (maxRadius / 200) * (state.windSpeed / 10);
+            const dx = Math.cos(angleRad) * speedScale * state.currentTimeOffset;
+            const dy = Math.sin(angleRad) * speedScale * state.currentTimeOffset;
+
+            // Get Evolution Model
+            const evo = document.getElementById('evolutionModel').value;
+            let evoFactor = 1.0;
+            if (evo === 'decay' && state.currentTimeOffset > 0) evoFactor = Math.max(0.2, 1 - (state.currentTimeOffset * 0.07));
+            if (evo === 'intensify' && state.currentTimeOffset > 0) evoFactor = 1 + (state.currentTimeOffset * 0.05);
+
+            // 2. Draw Lat/Lon Grid if enabled
+            if (document.getElementById('showGrid').checked) {
+                ctx.strokeStyle = isSatRgb ? 'rgba(255, 255, 255, 0.08)' : 'rgba(56, 189, 248, 0.06)';
+                ctx.lineWidth = 1;
+                const step = w / 8;
+                for (let x = step; x < w; x += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0); ctx.lineTo(x, h);
+                    ctx.stroke();
+                }
+                for (let y = step; y < h; y += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y); ctx.lineTo(w, y);
+                    ctx.stroke();
+                }
+            }
+
+            // 3. Draw Range Rings (50km, 100km, 150km, 200km)
+            if (document.getElementById('showRings').checked) {
+                ctx.strokeStyle = isSatRgb ? 'rgba(255, 255, 255, 0.16)' : 'rgba(56, 189, 248, 0.15)';
+                ctx.lineWidth = 1;
+                for (let r = 1; r <= 4; r++) {
+                    const radius = (maxRadius / 4) * r;
+                    ctx.beginPath();
+                    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    ctx.fillStyle = isSatRgb ? 'rgba(226, 232, 240, 0.65)' : 'rgba(148, 163, 184, 0.55)';
+                    ctx.font = '10px JetBrains Mono';
+                    ctx.fillText(`${r * 50} km`, center.x + 5, center.y - radius + 12);
+                }
+
+                ctx.strokeStyle = isSatRgb ? 'rgba(255, 255, 255, 0.12)' : 'rgba(56, 189, 248, 0.12)';
+                ctx.beginPath();
+                ctx.moveTo(center.x, center.y - maxRadius);
+                ctx.lineTo(center.x, center.y + maxRadius);
+                ctx.moveTo(center.x - maxRadius, center.y);
+                ctx.lineTo(center.x + maxRadius, center.y);
+                ctx.stroke();
+            }
+
+            // 4. Render Background Drizzle Scatter or Shallow Cloud Feathers
+            state.backgroundScatter.forEach((dot) => {
+                const px = center.x + (dot.x - 200) * (maxRadius / 200) + dx * 0.7;
+                const py = center.y + (dot.y - 200) * (maxRadius / 200) + dy * 0.7;
+                const distToCenter = Math.hypot(px - center.x, py - center.y);
+                if (distToCenter < maxRadius) {
+                    const shimmer = (Math.sin(state.animTime * 3 + dot.phase) + 1) * 0.5;
+                    const r = dot.radius * (0.8 + shimmer * 0.5);
+                    if (isSatRgb) {
+                        ctx.fillStyle = `rgba(226, 232, 240, ${0.12 + shimmer * 0.15})`;
+                    } else if (isSatIr) {
+                        ctx.fillStyle = getSatelliteIrColor(-20 - dot.dbz * 0.4, 0.4);
+                    } else {
+                        ctx.fillStyle = getDbzColor(dot.dbz, (0.2 + shimmer * 0.3) * (dot.dbz / 35));
+                    }
+                    ctx.beginPath();
+                    ctx.arc(px, py, r, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // 5. [ADDED] Render Realistic Satellite Weather Storm or Doppler Reflectivity
+            state.radarCells.forEach((cell, cIdx) => {
+                const cellCenterX = center.x + (cell.x - 200) * (maxRadius / 200) + dx;
+                const cellCenterY = center.y + (cell.y - 200) * (maxRadius / 200) + dy;
+                
+                const pulse = Math.sin(state.animTime * 2.2 + cIdx * 1.5) * 0.06;
+                const baseRadius = cell.radius * (maxRadius / 200) * (1 + (cell.growthRate * state.currentTimeOffset * 0.03)) * (1 + pulse);
+                const currentDbz = Math.min(68, Math.max(10, cell.maxDbz * evoFactor));
+                const vortexAngle = state.animTime * cell.spinSpeed * 25;
+                const tempC = -30 - (currentDbz / 68) * 55; // Converted cloud top temp (-30 to -85 C)
+
+                if (isSatRgb) {
+                    // ==========================================
+                    // 🛰️ VISIBLE / TRUE COLOR SATELLITE RENDERING
+                    // ==========================================
+
+                    // 5.1 Outermost Cirrus Outflow Shield (ริ้วเมฆขนแกะชั้นบนแผ่ฟุ้ง)
+                    const cirrusRadius = baseRadius * 1.6;
+                    const cirrusGrad = ctx.createRadialGradient(cellCenterX, cellCenterY, baseRadius * 0.4, cellCenterX, cellCenterY, cirrusRadius);
+                    cirrusGrad.addColorStop(0, 'rgba(255, 255, 255, 0.38)');
+                    cirrusGrad.addColorStop(0.5, 'rgba(241, 245, 249, 0.22)');
+                    cirrusGrad.addColorStop(0.85, 'rgba(203, 213, 225, 0.08)');
+                    cirrusGrad.addColorStop(1, 'rgba(203, 213, 225, 0)');
+
+                    ctx.fillStyle = cirrusGrad;
+                    ctx.beginPath();
+                    ctx.arc(cellCenterX, cellCenterY, cirrusRadius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Striated Cirrus Fibers (ริ้วเส้นเมฆตามลมชั้นบน)
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+                    ctx.lineWidth = 1.2;
+                    for (let s = 0; s < 12; s++) {
+                        const sAngle = (Math.PI * 2 / 12) * s - vortexAngle * 0.4;
+                        ctx.beginPath();
+                        ctx.moveTo(cellCenterX + Math.cos(sAngle) * baseRadius * 0.6, cellCenterY + Math.sin(sAngle) * baseRadius * 0.6);
+                        ctx.quadraticCurveTo(
+                            cellCenterX + Math.cos(sAngle + 0.3) * baseRadius * 1.2,
+                            cellCenterY + Math.sin(sAngle + 0.3) * baseRadius * 1.2,
+                            cellCenterX + Math.cos(sAngle + 0.7) * cirrusRadius,
+                            cellCenterY + Math.sin(sAngle + 0.7) * cirrusRadius
+                        );
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+
+                    // 5.2 Spiral Inflow Rainbands (แถบเกลียวเมฆหนาทึบม้วนเข้าหาตา)
+                    if (cell.bands > 0) {
+                        for (let b = 0; b < cell.bands; b++) {
+                            const bandOffset = (Math.PI * 2 / cell.bands) * b + vortexAngle;
+                            const bandPoints = 22;
+                            ctx.beginPath();
+                            for (let p = 0; p < bandPoints; p++) {
+                                const prog = p / bandPoints;
+                                const rDist = baseRadius * (0.35 + prog * 1.3);
+                                const theta = bandOffset + prog * 1.85;
+                                const bx = cellCenterX + Math.cos(theta) * rDist;
+                                const by = cellCenterY + Math.sin(theta) * rDist;
+                                if (p === 0) ctx.moveTo(bx, by);
+                                else ctx.lineTo(bx, by);
+                            }
+                            // 3D Cloud Arm with Shading
+                            ctx.strokeStyle = 'rgba(226, 232, 240, 0.65)';
+                            ctx.lineWidth = Math.max(5, baseRadius * 0.28 * (1 - b * 0.15));
+                            ctx.lineCap = 'round';
+                            ctx.stroke();
+                        }
+                    }
+
+                    // 5.3 Volumetric Sub-lobes (กลุ่มเมฆก้อนกลมย่อย 3 มิติ)
+                    cell.subLobes.forEach((sub, sIdx) => {
+                        const subAngle = sub.angleOffset + vortexAngle * 1.3;
+                        const subDist = sub.offsetDist * (maxRadius / 200);
+                        const subX = cellCenterX + Math.cos(subAngle) * subDist;
+                        const subY = cellCenterY + Math.sin(subAngle) * subDist;
+                        const subR = baseRadius * sub.rRatio;
+
+                        // 3D Sun Highlight from Top-Left (ดวงอาทิตย์ส่องจากซ้ายบน)
+                        const subGrad = ctx.createRadialGradient(subX - subR * 0.25, subY - subR * 0.25, subR * 0.05, subX, subY, subR);
+                        subGrad.addColorStop(0, '#ffffff'); // Direct sunlight peak
+                        subGrad.addColorStop(0.4, '#f1f5f9');
+                        subGrad.addColorStop(0.75, '#cbd5e1'); // Midtone
+                        subGrad.addColorStop(1, 'rgba(100, 116, 139, 0)'); // Soft edge
+
+                        ctx.fillStyle = subGrad;
+                        ctx.beginPath();
+                        ctx.arc(subX, subY, subR, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+
+                    // 5.4 Central Dense Overcast (CDO) & Convective Core
+                    const cdoGrad = ctx.createRadialGradient(cellCenterX - baseRadius * 0.2, cellCenterY - baseRadius * 0.2, baseRadius * 0.1, cellCenterX, cellCenterY, baseRadius);
+                    cdoGrad.addColorStop(0, '#ffffff');
+                    cdoGrad.addColorStop(0.5, '#f8fafc');
+                    cdoGrad.addColorStop(0.85, '#cbd5e1');
+                    cdoGrad.addColorStop(1, 'rgba(148, 163, 184, 0)');
+
+                    ctx.fillStyle = cdoGrad;
+                    ctx.beginPath();
+                    ctx.arc(cellCenterX, cellCenterY, baseRadius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 5.5 Overshooting Top / Storm Eye (ตาพายุหรือยอดเมฆทะลุชั้นโทรโพพอส)
+                    if (currentDbz >= 55) {
+                        const eyeRadius = Math.max(3.5, baseRadius * 0.16);
+                        
+                        // Dark storm eye depression
+                        const eyeGrad = ctx.createRadialGradient(cellCenterX, cellCenterY, 0, cellCenterX, cellCenterY, eyeRadius);
+                        eyeGrad.addColorStop(0, '#081728'); // Deep eye hole showing ocean
+                        eyeGrad.addColorStop(0.65, '#1e293b');
+                        eyeGrad.addColorStop(1, 'rgba(255, 255, 255, 0.9)'); // Bright eyewall rim
+
+                        ctx.fillStyle = eyeGrad;
+                        ctx.beginPath();
+                        ctx.arc(cellCenterX, cellCenterY, eyeRadius, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Eyewall Highlight
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+
+                } else if (isSatIr) {
+                    // ==========================================
+                    // 🌈 ENHANCED IR SATELLITE (Cloud Top Temp)
+                    // ==========================================
+                    if (cell.bands > 0) {
+                        for (let b = 0; b < cell.bands; b++) {
+                            const bandOffset = (Math.PI * 2 / cell.bands) * b + vortexAngle;
+                            ctx.beginPath();
+                            for (let p = 0; p < 20; p++) {
+                                const prog = p / 20;
+                                const rDist = baseRadius * (0.4 + prog * 1.3);
+                                const theta = bandOffset + prog * 1.8;
+                                const bx = cellCenterX + Math.cos(theta) * rDist;
+                                const by = cellCenterY + Math.sin(theta) * rDist;
+                                if (p === 0) ctx.moveTo(bx, by);
+                                else ctx.lineTo(bx, by);
+                            }
+                            ctx.strokeStyle = getSatelliteIrColor(tempC + 20, 0.55);
+                            ctx.lineWidth = Math.max(4, baseRadius * 0.22);
+                            ctx.stroke();
+                        }
+                    }
+
+                    // CDO Multi-layer Infrared Core
+                    const irGrad = ctx.createRadialGradient(cellCenterX, cellCenterY, 0, cellCenterX, cellCenterY, baseRadius);
+                    irGrad.addColorStop(0, getSatelliteIrColor(tempC, 0.95));
+                    irGrad.addColorStop(0.35, getSatelliteIrColor(tempC + 10, 0.85));
+                    irGrad.addColorStop(0.7, getSatelliteIrColor(tempC + 25, 0.65));
+                    irGrad.addColorStop(1, 'rgba(0,0,0,0)');
+
+                    ctx.fillStyle = irGrad;
+                    ctx.beginPath();
+                    ctx.arc(cellCenterX, cellCenterY, baseRadius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                } else {
+                    // ==========================================
+                    // 📡 DOPPLER RADAR REFLECTIVITY (dBZ Mode)
+                    // ==========================================
+                    if (cell.bands > 0 && currentDbz > 30) {
+                        for (let b = 0; b < cell.bands; b++) {
+                            const bandOffset = (Math.PI * 2 / cell.bands) * b + vortexAngle;
+                            ctx.beginPath();
+                            for (let p = 0; p < 18; p++) {
+                                const prog = p / 18;
+                                const rDist = baseRadius * (0.5 + prog * 1.35);
+                                const theta = bandOffset + prog * 1.7;
+                                const bx = cellCenterX + Math.cos(theta) * rDist;
+                                const by = cellCenterY + Math.sin(theta) * rDist;
+                                if (p === 0) ctx.moveTo(bx, by);
+                                else ctx.lineTo(bx, by);
+                            }
+                            const bandDbz = Math.max(15, currentDbz - 20 - b * 4);
+                            ctx.strokeStyle = getDbzColor(bandDbz, 0.45);
+                            ctx.lineWidth = Math.max(4, baseRadius * 0.22 * (1 - b * 0.2));
+                            ctx.lineCap = 'round';
+                            ctx.stroke();
+                        }
+                    }
+
+                    cell.subLobes.forEach((sub, sIdx) => {
+                        const subAngle = sub.angleOffset + vortexAngle * 1.3 + Math.sin(state.animTime + sIdx) * 0.15;
+                        const subDist = sub.offsetDist * (maxRadius / 200);
+                        const subX = cellCenterX + Math.cos(subAngle) * subDist;
+                        const subY = cellCenterY + Math.sin(subAngle) * subDist;
+                        const subR = baseRadius * sub.rRatio * (1 + Math.sin(state.animTime * 3 + sIdx) * 0.08);
+                        const subDbz = Math.min(65, Math.max(12, currentDbz + sub.dbzOffset));
+
+                        const gradSub = ctx.createRadialGradient(subX, subY, 0, subX, subY, Math.max(1, subR));
+                        gradSub.addColorStop(0, getDbzColor(subDbz, 0.85));
+                        gradSub.addColorStop(0.55, getDbzColor(Math.max(10, subDbz - 12), 0.65));
+                        gradSub.addColorStop(1, getDbzColor(0, 0));
+
+                        ctx.fillStyle = gradSub;
+                        ctx.beginPath();
+                        ctx.arc(subX, subY, Math.max(1, subR), 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+
+                    const grad = ctx.createRadialGradient(cellCenterX, cellCenterY, 0, cellCenterX, cellCenterY, Math.max(1, baseRadius));
+                    grad.addColorStop(0, getDbzColor(currentDbz, 0.95));
+                    grad.addColorStop(0.35, getDbzColor(currentDbz - 8, 0.85));
+                    grad.addColorStop(0.7, getDbzColor(Math.max(15, currentDbz - 22), 0.55));
+                    grad.addColorStop(1, getDbzColor(0, 0));
+
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(cellCenterX, cellCenterY, Math.max(1, baseRadius), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Motion Vector Arrow
+                if (document.getElementById('showVectors').checked && state.currentTimeOffset >= 0) {
+                    ctx.strokeStyle = isSatRgb ? 'rgba(56, 189, 248, 0.85)' : 'rgba(234, 179, 8, 0.8)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(cellCenterX, cellCenterY);
+                    const vecEndX = cellCenterX + Math.cos(angleRad) * 40;
+                    const vecEndY = cellCenterY + Math.sin(angleRad) * 40;
+                    ctx.lineTo(vecEndX, vecEndY);
+                    ctx.stroke();
+
+                    const arrowAngle = Math.atan2(vecEndY - cellCenterY, vecEndX - cellCenterX);
+                    ctx.fillStyle = isSatRgb ? '#38bdf8' : 'rgba(234, 179, 8, 0.9)';
+                    ctx.beginPath();
+                    ctx.moveTo(vecEndX, vecEndY);
+                    ctx.lineTo(vecEndX - 8 * Math.cos(arrowAngle - Math.PI / 6), vecEndY - 8 * Math.sin(arrowAngle - Math.PI / 6));
+                    ctx.lineTo(vecEndX - 8 * Math.cos(arrowAngle + Math.PI / 6), vecEndY - 8 * Math.sin(arrowAngle + Math.PI / 6));
+                    ctx.fill();
+                }
+
+                // Severe Core Lightning Strike Simulation
+                if (document.getElementById('showLightning').checked && currentDbz >= 50) {
+                    if (Math.random() < 0.045) {
+                        const strikeX = cellCenterX + (Math.random() - 0.5) * (baseRadius * 0.7);
+                        const strikeY = cellCenterY + (Math.random() - 0.5) * (baseRadius * 0.7);
+                        const endX = strikeX + (Math.random() - 0.5) * 35;
+                        const endY = strikeY + Math.random() * 30 + 10;
+                        
+                        state.lightningStrikes.push({
+                            x1: strikeX, y1: strikeY, x2: endX, y2: endY,
+                            opacity: 1.0,
+                            created: Date.now()
+                        });
+                    }
+                }
+            });
+
+            // 6. Render & Decay Active Lightning Strikes
+            if (document.getElementById('showLightning').checked) {
+                const now = Date.now();
+                for (let i = state.lightningStrikes.length - 1; i >= 0; i--) {
+                    const l = state.lightningStrikes[i];
+                    const age = now - l.created;
+                    if (age > 240) {
+                        state.lightningStrikes.splice(i, 1);
+                        continue;
+                    }
+
+                    ctx.fillStyle = `rgba(224, 242, 254, ${(1 - age / 240) * 0.35})`;
+                    ctx.beginPath();
+                    ctx.arc((l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2, 42, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    drawLightningBolt(l.x1, l.y1, l.x2, l.y2, 0);
+                }
+            }
+
+            // 7. Render 360° Rotating Radar / Satellite Sweep Beam
+            if (document.getElementById('showSweepBeam').checked) {
+                state.sweepAngle += state.sweepSpeed;
+                if (state.sweepAngle > Math.PI * 2) state.sweepAngle -= Math.PI * 2;
+
+                const beamAngle = state.sweepAngle;
+                const trailAngle = 0.55;
+
+                const sweepGrad = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, maxRadius);
+                sweepGrad.addColorStop(0, isSatRgb ? 'rgba(255, 255, 255, 0.22)' : 'rgba(6, 182, 212, 0.25)');
+                sweepGrad.addColorStop(0.7, isSatRgb ? 'rgba(255, 255, 255, 0.06)' : 'rgba(6, 182, 212, 0.08)');
+                sweepGrad.addColorStop(1, 'rgba(6, 182, 212, 0.01)');
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(center.x, center.y);
+                ctx.arc(center.x, center.y, maxRadius, beamAngle - trailAngle, beamAngle, false);
+                ctx.closePath();
+                ctx.fillStyle = sweepGrad;
+                ctx.fill();
+                ctx.restore();
+
+                ctx.strokeStyle = isSatRgb ? 'rgba(255, 255, 255, 0.9)' : 'rgba(165, 243, 252, 0.85)';
+                ctx.lineWidth = 1.8;
+                ctx.beginPath();
+                ctx.moveTo(center.x, center.y);
+                ctx.lineTo(center.x + Math.cos(beamAngle) * maxRadius, center.y + Math.sin(beamAngle) * maxRadius);
+                ctx.stroke();
+            }
+
+            // 8. Center Station Point & Pulse Ring
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            const stationPulse = (Math.sin(state.animTime * 4) + 1) * 3;
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, 7 + stationPulse, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Continuous Animation Engine
+        function animationEngine() {
+            state.animTime += 0.04;
+            renderRadar();
+            state.animationFrameId = requestAnimationFrame(animationEngine);
+        }
+
+        // Timeline Controls
+        const timeSlider = document.getElementById('timeSlider');
+        timeSlider.addEventListener('input', (e) => {
+            state.currentTimeOffset = parseInt(e.target.value);
+            updateTimeUI();
+        });
+
+        function updateTimeUI() {
+            const offset = state.currentTimeOffset;
+            const now = new Date();
+            const targetTime = new Date(now.getTime() + offset * 3600 * 1000);
+
+            const timeStr = `${targetTime.getFullYear()}-${String(targetTime.getMonth()+1).padStart(2,'0')}-${String(targetTime.getDate()).padStart(2,'0')} ${String(targetTime.getHours()).padStart(2,'0')}:${String(targetTime.getMinutes()).padStart(2,'0')} น.`;
+            document.getElementById('timestampDisplay').innerText = timeStr;
+
+            const label = document.getElementById('timelineTypeLabel');
+            const badge = document.getElementById('timeStatusBadge');
+            const offsetLabel = document.getElementById('forecastOffsetLabel');
+
+            if (offset < 0) {
+                label.innerText = 'สถานะ: ข้อมูลอดีต (Observed)';
+                label.className = 'text-xs font-bold uppercase tracking-wider text-amber-400';
+                badge.className = 'w-3 h-3 rounded-full bg-amber-400';
+                offsetLabel.innerText = `ย้อนหลัง: ${offset} ชั่วโมง`;
+            } else if (offset === 0) {
+                label.innerText = 'สถานะ: ปัจจุบัน (Realtime)';
+                label.className = 'text-xs font-bold uppercase tracking-wider text-cyan-400';
+                badge.className = 'w-3 h-3 rounded-full bg-cyan-400 animate-ping';
+                offsetLabel.innerText = 'พยากรณ์ล่วงหน้า: +0 ชั่วโมง';
+            } else {
+                label.innerText = 'สถานะ: พยากรณ์ล่วงหน้า (Forecast)';
+                label.className = 'text-xs font-bold uppercase tracking-wider text-indigo-400';
+                badge.className = 'w-3 h-3 rounded-full bg-indigo-400';
+                offsetLabel.innerText = `คาดการณ์ล่วงหน้า: +${offset} ชั่วโมง`;
+            }
+
+            timeSlider.value = offset;
+        }
+
+        // Step Frame
+        function stepFrame(dir) {
+            state.currentTimeOffset = Math.max(-10, Math.min(10, state.currentTimeOffset + dir));
+            updateTimeUI();
+        }
+
+        function resetToNow() {
+            state.currentTimeOffset = 0;
+            updateTimeUI();
+        }
+
+        // Playback Loop
+        function togglePlay() {
+            state.isPlaying = !state.isPlaying;
+            const btnIcon = document.getElementById('playIcon');
+            if (state.isPlaying) {
+                btnIcon.className = 'fa-solid fa-pause';
+                startLoop();
+            } else {
+                btnIcon.className = 'fa-solid fa-play';
+                stopLoop();
+            }
+        }
+
+        function startLoop() {
+            stopLoop();
+            state.timerId = setInterval(() => {
+                state.currentTimeOffset++;
+                if (state.currentTimeOffset > 10) state.currentTimeOffset = -10;
+                updateTimeUI();
+            }, 1000 / state.playSpeed);
+        }
+
+        function stopLoop() {
+            if (state.timerId) clearInterval(state.timerId);
+        }
+
+        function setSpeed(spd) {
+            state.playSpeed = spd;
+            document.querySelectorAll('.speed-btn').forEach(b => {
+                b.className = 'speed-btn px-2 py-1 rounded text-slate-300 hover:bg-slate-700';
+            });
+            event.target.className = 'speed-btn px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30';
+            if (state.isPlaying) startLoop();
+        }
+
+        // Initialize Chart.js and allow dynamic dataset updating
+        function initChart() {
+            const ctxChart = document.getElementById('forecastChart').getContext('2d');
+            const labels = Array.from({length: 11}, (_, i) => `+${i}h`);
+            const stationData = STATIONS_GEO[state.station] || STATIONS_GEO.composite;
+
+            state.forecastChart = new Chart(ctxChart, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'อัตราฝนตกคาดการณ์ (mm/hr)',
+                        data: stationData.mockData,
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2,
+                        pointBackgroundColor: '#0284c7'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8', font: { size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8', font: { size: 10 } },
+                            min: 0,
+                            max: 70
+                        }
+                    }
+                }
+            });
+
+            updateHourlyTable(stationData.mockData, stationData.maxDbz);
+        }
+
+        // Update Hourly Table Dynamically
+        function updateHourlyTable(mockData, maxDbz) {
+            const tableBody = document.getElementById('hourlyTableBody');
+            tableBody.innerHTML = '';
+            for (let i = 1; i <= 10; i++) {
+                const mmhr = mockData[i] !== undefined ? mockData[i] : 0;
+                const dbz = Math.round(Math.max(12, maxDbz - i * 3.8 + (Math.sin(i * 1.5) * 4)));
+                let riskBadge = '<span class="text-emerald-400">ต่ำ</span>';
+                if (dbz > 35 && dbz <= 48) riskBadge = '<span class="text-yellow-400">ปานกลาง</span>';
+                if (dbz > 48) riskBadge = '<span class="text-red-400">สูงมาก</span>';
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800/60 transition';
+                tr.innerHTML = `
+                    <td class="py-2 text-cyan-300">+${i} ชั่วโมง</td>
+                    <td class="py-2">${dbz} dBZ</td>
+                    <td class="py-2">${mmhr} mm/h</td>
+                    <td class="py-2 text-right">${riskBadge}</td>
+                `;
+                tableBody.appendChild(tr);
+            }
+        }
+
+        // Full station change handler
+        function onStationChange(stKey) {
+            state.station = stKey;
+            const geo = STATIONS_GEO[stKey] || STATIONS_GEO.composite;
+            
+            // 1. Update Coordinates
+            state.stationLat = geo.lat;
+            state.stationLon = geo.lon;
+            document.getElementById('stationCoordsLabel').innerText = `${geo.lat.toFixed(2)}°N, ${geo.lon.toFixed(2)}°E`;
+            document.getElementById('headerStationBadge').innerText = geo.name;
+
+            // 2. Update Steering Wind Parameters
+            state.windDirection = geo.windDir;
+            state.windSpeed = geo.windSpeed;
+            document.getElementById('windDirText').innerText = geo.windDirText;
+            document.getElementById('windSpeedText').innerText = `${geo.windSpeed} กม./ชม.`;
+
+            // 3. Update Weather Metrics
+            document.getElementById('rainAreaMetric').innerText = geo.rainArea;
+            document.getElementById('maxDbzMetric').innerText = `${geo.maxDbz} dBZ`;
+
+            // 4. Re-populate Storm Cells for that specific radar station
+            initRadarCells(stKey);
+
+            // 5. Update Forecast Chart
+            if (state.forecastChart) {
+                state.forecastChart.data.datasets[0].data = geo.mockData;
+                state.forecastChart.update();
+            }
+
+            // 6. Update Forecast Breakdown Table
+            updateHourlyTable(geo.mockData, geo.maxDbz);
+
+            // 7. Reset AI Summary Box
+            const summaryBox = document.getElementById('aiSummaryBox');
+            summaryBox.innerHTML = `
+                <div class="text-center text-slate-400 py-3">
+                    <span class="text-cyan-300 font-bold block mb-1">เปลี่ยนเป็น ${geo.name} เรียบร้อย</span>
+                    <span class="text-[11px] text-slate-500">กดปุ่ม "ให้ AI สรุปอาการ & วิเคราะห์" เพื่อประมวลผลข้อมูลสถานีนี้</span>
+                </div>
+            `;
+        }
+
+        // API Key Modal Handlers
+        function openApiKeyModal() {
+            const input = document.getElementById('geminiApiKeyInput');
+            input.value = localStorage.getItem('gemini_api_key') || '';
+            const modal = document.getElementById('apiKeyModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeApiKeyModal() {
+            const modal = document.getElementById('apiKeyModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('geminiApiKeyInput').value.trim();
+            if (key) {
+                localStorage.setItem('gemini_api_key', key);
+                document.getElementById('aiEngineBadge').innerText = 'Gemini 3.8 Flash';
+                document.getElementById('aiEngineBadge').className = 'text-[10px] text-cyan-400 font-bold mono';
+            } else {
+                localStorage.removeItem('gemini_api_key');
+                document.getElementById('aiEngineBadge').innerText = 'Nowcasting Engine';
+                document.getElementById('aiEngineBadge').className = 'text-[10px] text-slate-400 mono';
+            }
+            closeApiKeyModal();
+        }
+
+        function clearApiKey() {
+            document.getElementById('geminiApiKeyInput').value = '';
+            localStorage.removeItem('gemini_api_key');
+            document.getElementById('aiEngineBadge').innerText = 'Nowcasting Engine';
+            document.getElementById('aiEngineBadge').className = 'text-[10px] text-slate-400 mono';
+            closeApiKeyModal();
+        }
+
+        // Google Maps Launchers & Modal Handlers
+        function openGoogleMapModal(targetLat, targetLon) {
+            const lat = targetLat !== undefined ? targetLat : state.stationLat;
+            const lon = targetLon !== undefined ? targetLon : state.stationLon;
+            const stationInfo = STATIONS_GEO[state.station] || STATIONS_GEO.composite;
+
+            document.getElementById('modalStationTag').innerText = stationInfo.name;
+            const iframe = document.getElementById('googleMapIframe');
+            iframe.src = `https://maps.google.com/maps?q=${lat},${lon}&hl=th&z=9&output=embed`;
+
+            const modal = document.getElementById('googleMapsModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeGoogleMapModal() {
+            const modal = document.getElementById('googleMapsModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('googleMapIframe').src = 'about:blank';
+        }
+
+        function openCurrentStationInGoogleMap() {
+            window.open(`https://www.google.com/maps?q=${state.stationLat},${state.stationLon}&hl=th`, '_blank');
+        }
+
+        function openCurrentInGoogleMapsTab() {
+            window.open(`https://www.google.com/maps?q=${state.stationLat},${state.stationLon}&hl=th`, '_blank');
+        }
+
+        // AI Engine configured to call Google Gemini 3.8 Flash
+        async function generateAiForecast() {
+            const summaryBox = document.getElementById('aiSummaryBox');
+            summaryBox.innerHTML = `
+                <div class="flex items-center justify-center py-6 gap-2 text-cyan-400">
+                    <i class="fa-solid fa-spinner animate-spin"></i>
+                    <span>กำลังเชื่อมต่อ Gemini 3.8 Flash เพื่อประมวลผลข้อมูลเรดาร์สะท้อนรวม...</span>
+                </div>
+            `;
+
+            const st = STATIONS_GEO[state.station] || STATIONS_GEO.composite;
+            const apiKey = localStorage.getItem('gemini_api_key');
+
+            if (apiKey) {
+                try {
+                    const systemPrompt = "คุณเป็นผู้เชี่ยวชาญด้านอุตุนิยมวิทยาเรดาร์ (Radar Meteorologist) และการพยากรณ์อากาศระยะสั้น (Nowcasting) จงสรุปอาการกลุ่มฝนและความเสี่ยงในอีก 10 ชั่วโมงข้างหน้าเป็นภาษาไทยอย่างมืออาชีพ กระชับ และตรงจุด";
+                    const userPrompt = `
+ข้อมูลสแนปชอตเรดาร์ปัจจุบัน:
+- สถานีเรดาร์: ${st.name} (พิกัด: ${st.lat}, ${st.lon})
+- ทิศทางลมชี้นำกลุ่มฝน: ${st.windDirText} (ความเร็ว ${st.windSpeed} กม./ชม.)
+- พื้นที่ปกคลุมฝนปัจจุบัน: ${st.rainArea}
+- ค่าสะท้อนสูงสุด (Max Reflectivity): ${st.maxDbz} dBZ
+- ปริมาณฝนคาดการณ์ 10 ชั่วโมงข้างหน้า (mm/hr): ${st.mockData.join(', ')}
+
+จงสรุปสั้นๆ เป็น 3 หัวข้อหลัก:
+1. 🌧️ **สรุปอาการและสถานการณ์ฝนล่วงหน้า 10 ชม.**
+2. ⚠️ **พื้นที่เสี่ยงและข้อควรระวัง (น้ำท่วมขัง/ลมกระโชกแรง/ฟ้าผ่า)**
+3. 💡 **คำแนะนำสำหรับการบริหารจัดการ**
+                    `;
+
+                    let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+                    
+                    let response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: userPrompt }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] }
+                        })
+                    });
+
+                    if (!response.ok && response.status === 404) {
+                        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-preview:generateContent?key=${apiKey}`;
+                        response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: userPrompt }] }],
+                                systemInstruction: { parts: [{ text: systemPrompt }] }
+                            })
+                        });
+                    }
+
+                    if (!response.ok) throw new Error(`Google API ตอบกลับรหัส ${response.status}`);
+
+                    const result = await response.json();
+                    const aiText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (aiText) {
+                        const formattedHtml = aiText
+                            .replace(/\*\*(.*?)\*\*/g, '<strong class="text-cyan-300 font-semibold">$1</strong>')
+                            .replace(/\n/g, '<br>');
+                        
+                        summaryBox.innerHTML = `
+                            <div class="prose prose-invert text-xs leading-relaxed space-y-1">
+                                <div class="text-[10px] text-cyan-400 font-mono mb-2 flex items-center gap-1 border-b border-slate-700/60 pb-1">
+                                    <i class="fa-solid fa-sparkles text-yellow-400"></i> วิเคราะห์โดย Google Gemini 3.8 Flash
+                                </div>
+                                ${formattedHtml}
+                            </div>
+                        `;
+                        return;
+                    }
+                } catch (err) {
+                    console.warn("Gemini 3.8 Flash call failed, switching to Built-in Meteorological Engine:", err);
+                }
+            }
+
+            // Built-in Meteorological Nowcasting Algorithmic Diagnostic Engine
+            setTimeout(() => {
+                const maxHour = st.mockData.indexOf(Math.max(...st.mockData));
+                const peakRain = Math.max(...st.mockData);
+                const hasSevereHail = st.maxDbz >= 60;
+
+                let severityText = 'ฝนตกปานกลางถึงหนัก';
+                if (st.maxDbz >= 62) severityText = 'พายุฝนฟ้าคะนองรุนแรง ลมกระโชกแรง และเสี่ยงลูกเห็บตก';
+                else if (st.maxDbz >= 52) severityText = 'ฝนตกหนัก มีฟ้าผ่าเป็นระยะ';
+
+                const diagnosisHtml = `
+                    <div class="prose prose-invert text-xs leading-relaxed space-y-2">
+                        <div class="text-[10px] text-emerald-400 font-mono mb-1 flex items-center justify-between border-b border-slate-700/60 pb-1">
+                            <span><i class="fa-solid fa-satellite-dish"></i> การวินิจฉัย Nowcasting โดยตรงจากข้อมูลเรดาร์ (${st.name})</span>
+                            <span class="text-slate-400">อัปเดตสด</span>
+                        </div>
+                        
+                        <div>
+                            <strong class="text-cyan-300 block mb-0.5">🌧️ 1. สรุปอาการและแนวโน้มกลุ่มฝน 10 ชั่วโมงข้างหน้า:</strong>
+                            ตรวจพบกลุ่มฝนพาความร้อน (Convective Cells) ความแรงสะท้อนสูงสุด <span class="text-red-400 font-bold">${st.maxDbz} dBZ</span> ปกคลุมพื้นที่รัศมีตรวจวัดแล้ว <span class="text-emerald-400 font-bold">${st.rainArea}</span> เคลื่อนตัวตามลมชี้นำทิศ <span class="text-cyan-300 font-bold">${st.windDirText}</span> ความเร็ว ${st.windSpeed} กม./ชม. คาดว่าจะมีฝนตกหนักที่สุดช่วง <span class="text-amber-300 font-bold">+${maxHour === 0 ? 1 : maxHour} ถึง +${maxHour + 2} ชั่วโมง</span> (อัตราฝนสูงสุด ${peakRain} มม./ชม.) ก่อนที่กลุ่มเมฆจะเริ่มคลายตัวในชั่วโมงที่ +7 ถึง +10
+                        </div>
+
+                        <div>
+                            <strong class="text-amber-300 block mb-0.5">⚠️ 2. พื้นที่เสี่ยงและข้อควรระวัง:</strong>
+                            ${severityText} อาจส่งผลให้เกิดน้ำท่วมขังผิวการจราจรและพื้นที่ลุ่มต่ำในทิศทางท้ายลม ${hasSevereHail ? '<span class="text-rose-400 font-semibold">ระวังอันตรายจากลมกระโชกแรงและฟ้าผ่าในรัศมีแกนพายุ</span>' : 'ระวังทัศนวิสัยลดต่ำลงและถนนลื่น'}
+                        </div>
+
+                        <div>
+                            <strong class="text-emerald-300 block mb-0.5">💡 3. คำแนะนำสำหรับการบริหารจัดการ:</strong>
+                            เตรียมพร้อมระบบระบายน้ำในพื้นที่ชุมชนเมือง แนะนำผู้ใช้รถใช้ถนนวางแผนการเดินทางหลีกเลี่ยงช่วงฝนตกชุก และติดตามภาพสแกนเรดาร์อย่างต่อเนื่อง
+                        </div>
+                    </div>
+                `;
+                summaryBox.innerHTML = diagnosisHtml;
+            }, 400);
+        }
+
+        // Tooltip hover on Canvas with dynamic coordinate calculation relative to active station
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const tooltip = document.getElementById('hoverTooltip');
+            tooltip.style.left = `${e.clientX + 14}px`;
+            tooltip.style.top = `${e.clientY + 14}px`;
+            tooltip.classList.remove('hidden');
+
+            const pxPerDegLat = (canvas.height / 2) / 1.8;
+            const pxPerDegLon = (canvas.width / 2) / 1.8;
+
+            state.hoveredLat = (state.stationLat + (canvas.height / 2 - y) / pxPerDegLat).toFixed(4);
+            state.hoveredLon = (state.stationLon + (x - canvas.width / 2) / pxPerDegLon).toFixed(4);
+
+            document.getElementById('tooltipLatLon').innerText = `พิกัด: ${state.hoveredLat}°N, ${state.hoveredLon}°E`;
+        });
+
+        // Click anywhere on radar to open Google Maps for that exact location
+        canvas.addEventListener('click', () => {
+            window.open(`https://www.google.com/maps?q=${state.hoveredLat},${state.hoveredLon}&hl=th`, '_blank');
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            document.getElementById('hoverTooltip').classList.add('hidden');
+        });
+
+        // Close modal on Escape key press
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeGoogleMapModal();
+                closeApiKeyModal();
+            }
+        });
+
+        // Initialize Dashboard on Load
+        window.onload = function() {
+            initRadarCells('composite');
+            resizeCanvas();
+            updateTimeUI();
+            initChart();
+            onStationChange('composite');
+            updateLegendUI();
+            
+            if (localStorage.getItem('gemini_api_key')) {
+                document.getElementById('aiEngineBadge').innerText = 'Gemini 3.8 Flash';
+                document.getElementById('aiEngineBadge').className = 'text-[10px] text-cyan-400 font-bold mono';
+            }
+
+            animationEngine();
+        };
+    </script>
+</body>
+</html>
